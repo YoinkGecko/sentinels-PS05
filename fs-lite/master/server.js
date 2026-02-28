@@ -8,7 +8,7 @@ const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
-app.use(express.json({ limit: "100mb" }));
+app.use(express.json({ limit: "200mb" }));
 
 const PORT = process.argv[2];
 if (!PORT) {
@@ -177,14 +177,13 @@ app.get("/download/:fileId", async (req, res) => {
 
     const finalBuffer = Buffer.concat(buffers);
 
-    return res.json({
-      filename: metadata.filename,
-      data: finalBuffer.toString("base64"),
-    });
+    res.setHeader("Content-Disposition", `attachment; filename="${metadata.filename}"`);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.send(finalBuffer);
 
   } catch (err) {
     console.error("Download failed:", err.message);
-    return res.status(500).json({ error: "Download failed" });
+    res.status(500).json({ error: "Download failed" });
   }
 });
 
