@@ -15,7 +15,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const fileCache = new LRUCache({
   max: 5,
   maxSize: 200 * 1024 * 1024,
-  sizeCalculation: (value) => value.length,
+  sizeCalculation: (value) => value.buffer.length,
 });
 
 const PORT = process.argv[2];
@@ -36,7 +36,7 @@ const NODES = [
 
 let roundRobinIndex = 0;
 
-// ---------------- ALIVE NODE CHECK (TRUE DEATH ONLY) ----------------
+// ---------------- ALIVE NODE CHECK ----------------
 async function getAliveNodes() {
   const now = Date.now();
   const aliveNodes = [];
@@ -44,7 +44,6 @@ async function getAliveNodes() {
   for (const nodeUrl of NODES) {
     const nodeId = `node-${nodeUrl.split(":").pop()}`;
     const lastSeen = await redis.get(`node:${nodeId}`);
-
     if (!lastSeen) continue;
 
     if (now - Number(lastSeen) < 6000) {
@@ -54,7 +53,6 @@ async function getAliveNodes() {
 
   return aliveNodes;
 }
-
 
 // ---------------- SAFE RECONSTRUCTION ----------------
 async function reconstructFile(metadata, avoidNode = null) {
@@ -74,7 +72,6 @@ async function reconstructFile(metadata, avoidNode = null) {
 
         chunkBuffer = Buffer.from(response.data.data, "base64");
         break;
-
       } catch (_) {}
     }
 
@@ -88,7 +85,7 @@ async function reconstructFile(metadata, avoidNode = null) {
   return Buffer.concat(buffers);
 }
 
-
+// ---------------- PRE-CACHE ----------------
 async function preCacheFilesFromNode(nodeUrl) {
   const keys = await redis.keys("file:*");
 
@@ -110,12 +107,14 @@ async function preCacheFilesFromNode(nodeUrl) {
     console.log(`   📦 Pre-caching file ${fileId}`);
 
     try {
-      // 🚀 IMPORTANT: Avoid the node going blackout
       const buffer = await reconstructFile(metadata, nodeUrl);
 
-      fileCache.set(fileId, buffer);
-      console.log(`   ✅ Cached ${fileId}`);
+      fileCache.set(fileId, {
+        buffer,
+        filename: metadata.filename
+      });
 
+      console.log(`   ✅ Cached ${fileId}`);
     } catch (err) {
       console.log(
         `   ❌ Pre-cache failed for ${fileId}: ${err.message}`
@@ -124,7 +123,7 @@ async function preCacheFilesFromNode(nodeUrl) {
   }
 }
 
-// ---------------- REBALANCER (ONLY TRUE FAILURE) ----------------
+// ---------------- REBALANCER ----------------
 async function rebalance() {
   if (!amILeader()) return;
 
@@ -141,12 +140,9 @@ async function rebalance() {
     let updated = false;
 
     for (const chunk of metadata.chunks) {
-      // DO NOT remove blackout nodes
-      // Only act if replication count actually < 2
       if (chunk.nodes.length >= 2) continue;
 
       const sourceNode = chunk.nodes[0];
-
       const targetNode = aliveNodes.find(
         node => !chunk.nodes.includes(node)
       );
@@ -169,7 +165,6 @@ async function rebalance() {
         console.log(
           `Rebalanced chunk ${chunk.chunkId} to ${targetNode}`
         );
-
       } catch (err) {
         console.log("Rebalance failed:", err.message);
       }
@@ -181,42 +176,11 @@ async function rebalance() {
   }
 }
 
-// ---------------- PREDICTIVE PRE-CACHE ----------------
-async function preCacheFilesFromNode(nodeUrl) {
-  const keys = await redis.keys("file:*");
-
-  for (const key of keys) {
-    const data = await redis.get(key);
-    if (!data) continue;
-
-    const metadata = JSON.parse(data);
-    const fileId = metadata.fileId;
-
-    if (fileCache.has(fileId)) continue;
-
-    const affected = metadata.chunks.some(chunk =>
-      chunk.nodes.includes(nodeUrl)
-    );
-
-    if (!affected) continue;
-
-    console.log(`   📦 Pre-caching file ${fileId}`);
-
-    try {
-      const buffer = await reconstructFile(metadata, nodeUrl);
-      fileCache.set(fileId, buffer);
-      console.log(`   ✅ Cached ${fileId}`);
-   } catch (err) {
-  console.log(`   ❌ Pre-cache failed for ${fileId}:`, err.message);
-}
-  }
-}
-
 // ---------------- PREDICTIVE AVAILABILITY ----------------
 async function predictiveAvailabilityCheck() {
   if (!amILeader()) return;
 
-  const thresholdMs = 15000;
+  const thresholdMs = 4000;
 
   for (const nodeUrl of NODES) {
     try {
@@ -334,11 +298,15 @@ app.get("/download/:fileId", async (req, res) => {
     console.log(`\n📥 Download requested for ${fileId}`);
 
     if (fileCache.has(fileId)) {
-      console.log("⚡ Cache HIT");
-      const buffer = fileCache.get(fileId);
-      console.log(`⏱ Served in ${Date.now() - start} ms`);
+      const cached = fileCache.get(fileId);
+
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${cached.filename}"`
+      );
       res.setHeader("Content-Type", "application/octet-stream");
-      return res.send(buffer);
+
+      return res.send(cached.buffer);
     }
 
     const data = await redis.get(`file:${fileId}`);
@@ -349,14 +317,22 @@ app.get("/download/:fileId", async (req, res) => {
     const metadata = JSON.parse(data);
     const finalBuffer = await reconstructFile(metadata);
 
-    fileCache.set(fileId, finalBuffer);
+    fileCache.set(fileId, {
+      buffer: finalBuffer,
+      filename: metadata.filename
+    });
 
     console.log(
       `📦 Reconstructed ${(finalBuffer.length / 1024 / 1024).toFixed(2)} MB`
     );
     console.log(`⏱ Total time ${Date.now() - start} ms`);
 
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${metadata.filename}"`
+    );
     res.setHeader("Content-Type", "application/octet-stream");
+
     res.send(finalBuffer);
 
   } catch (err) {
