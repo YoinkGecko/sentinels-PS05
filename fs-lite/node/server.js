@@ -96,7 +96,7 @@ app.get("/orbital-status", (req, res) => {
   res.json({
     nodeId: NODE_ID,
     isInBlackout,
-    nextBlackoutInMs: nextBlackoutTime - Date.now()
+    nextBlackoutInMs: Math.max(0, nextBlackoutTime - Date.now())
   });
 });
 
