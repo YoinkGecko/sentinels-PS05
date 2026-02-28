@@ -296,6 +296,36 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/metadata", async (req, res) => {
+  const keys = await redis.keys("file:*");
+  const result = [];
+
+  for (const key of keys) {
+    const data = await redis.get(key);
+    if (!data) continue;
+
+    result.push(JSON.parse(data));
+  }
+
+  res.json({
+    totalFiles: result.length,
+    files: result
+  });
+});
+
+app.get("/metadata/:fileId", async (req, res) => {
+  const { fileId } = req.params;
+
+  const data = await redis.get(`file:${fileId}`);
+  if (!data) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  res.json(JSON.parse(data));
+});
+
+
+
 app.listen(PORT, () => {
   console.log(`🚀 Master ${MASTER_ID} running on ${PORT}`);
 });
