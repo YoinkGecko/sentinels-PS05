@@ -354,6 +354,49 @@ app.get("/metadata", async (req, res) => {
   res.json({ totalFiles: files.length, files });
 });
 
+app.get("/nodes", async (req, res) => {
+  const results = [];
+
+  for (const nodeUrl of NODES) {
+    try {
+      const health = await axios.get(`${nodeUrl}/health`);
+      const orbital = await axios.get(`${nodeUrl}/orbital-status`);
+
+      results.push({
+        url: nodeUrl,
+        alive: true,
+        ...orbital.data,
+      });
+
+    } catch (err) {
+      results.push({
+        url: nodeUrl,
+        alive: false,
+      });
+    }
+  }
+
+  res.json(results);
+});
+
+
+app.get("/cache-status", (req, res) => {
+  const entries = [];
+
+  fileCache.forEach((value, key) => {
+    entries.push({
+      fileId: key,
+      filename: value.filename,
+      sizeMB: (value.buffer.length / 1024 / 1024).toFixed(2),
+    });
+  });
+
+  res.json({
+    totalCached: entries.length,
+    files: entries
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Master ${MASTER_ID} running on ${PORT}`);
 });
