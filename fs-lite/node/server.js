@@ -16,9 +16,7 @@ const NODE_ID = `node-${PORT}`;
 const STORAGE_DIR = path.join(__dirname, `storage-${PORT}`);
 
 // Create storage directory if not exists
-if (!fs.existsSync(STORAGE_DIR)) {
-  fs.mkdirSync(STORAGE_DIR);
-}
+fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
 // -------- STORE CHUNK --------
 app.post("/store", async (req, res) => {
