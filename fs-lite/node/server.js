@@ -3,9 +3,6 @@ const fs = require("fs");
 const path = require("path");
 const { createClient } = require("redis");
 
-const redis = createClient();
-redis.connect().catch(console.error);
-
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
@@ -19,94 +16,116 @@ if (!PORT) {
 const NODE_ID = `node-${PORT}`;
 const STORAGE_DIR = path.join(__dirname, `storage-${PORT}`);
 
-// Create storage directory if not exists
+// Create storage directory
 fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
+// -------- REDIS --------
+const redis = createClient();
+redis.connect().catch(console.error);
+
+// -------- BLACKOUT SIMULATION --------
+// -------- BLACKOUT SIMULATION (PHASE SHIFTED) --------
+let isInBlackout = false;
+
+const BLACKOUT_INTERVAL = 30000; // every 30 sec
+const BLACKOUT_DURATION = 6000;  // 6 sec blackout
+
+// Phase offset based on port
+const phaseOffset = (Number(PORT) % 3) * 10000;
+
+let nextBlackoutTime = Date.now() + phaseOffset;
+
+function scheduleBlackout() {
+  const delay = nextBlackoutTime - Date.now();
+
+  setTimeout(() => {
+    isInBlackout = true;
+    console.log(`🌑 ${NODE_ID} entering blackout`);
+
+    setTimeout(() => {
+      isInBlackout = false;
+      console.log(`🌕 ${NODE_ID} signal restored`);
+
+      nextBlackoutTime = Date.now() + BLACKOUT_INTERVAL;
+      scheduleBlackout();
+
+    }, BLACKOUT_DURATION);
+
+  }, delay);
+}
+
+scheduleBlackout();
+
 // -------- STORE CHUNK --------
-app.post("/store", async (req, res) => {
-  try {
-    const { chunkId, data } = req.body;
-
-    if (!chunkId || !data) {
-      return res.status(400).json({ error: "chunkId and data required" });
-    }
-
-    const filePath = path.join(STORAGE_DIR, chunkId);
-
-    fs.writeFileSync(filePath, data, "base64");
-
-    console.log(`[${NODE_ID}] Stored chunk ${chunkId}`);
-
-    return res.json({
-      status: "stored",
-      node: NODE_ID,
-      chunkId,
-    });
-  } catch (err) {
-    console.error(`[${NODE_ID}] Store failed`, err.message);
-    return res.status(500).json({ error: "Store failed" });
+app.post("/store", (req, res) => {
+  if (isInBlackout) {
+    return res.status(503).json({ error: "Satellite in blackout" });
   }
+
+  const { chunkId, data } = req.body;
+  if (!chunkId || !data) {
+    return res.status(400).json({ error: "chunkId and data required" });
+  }
+
+  const filePath = path.join(STORAGE_DIR, chunkId);
+  fs.writeFileSync(filePath, data, "base64");
+
+  console.log(`[${NODE_ID}] Stored chunk ${chunkId}`);
+
+  res.json({ status: "stored", node: NODE_ID });
 });
 
 // -------- GET CHUNK --------
 app.get("/chunk/:chunkId", (req, res) => {
-  try {
-    const { chunkId } = req.params;
-    const filePath = path.join(STORAGE_DIR, chunkId);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "Chunk not found" });
-    }
-
-    const data = fs.readFileSync(filePath, "base64");
-
-    return res.json({ chunkId, data });
-  } catch (err) {
-    console.error(`[${NODE_ID}] Fetch failed`, err.message);
-    return res.status(500).json({ error: "Fetch failed" });
+  if (isInBlackout) {
+    return res.status(503).json({ error: "Satellite in blackout" });
   }
+
+  const filePath = path.join(STORAGE_DIR, req.params.chunkId);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "Chunk not found" });
+  }
+
+  const data = fs.readFileSync(filePath, "base64");
+  res.json({ chunkId: req.params.chunkId, data });
 });
 
-// -------- DELETE CHUNK --------
-app.delete("/chunk/:chunkId", (req, res) => {
-  try {
-    const { chunkId } = req.params;
-    const filePath = path.join(STORAGE_DIR, chunkId);
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    console.log(`[${NODE_ID}] Deleted chunk ${chunkId}`);
-
-    return res.json({ status: "deleted" });
-  } catch (err) {
-    console.error(`[${NODE_ID}] Delete failed`, err.message);
-    return res.status(500).json({ error: "Delete failed" });
-  }
+// -------- ORBITAL STATUS --------
+app.get("/orbital-status", (req, res) => {
+  res.json({
+    nodeId: NODE_ID,
+    isInBlackout,
+    nextBlackoutInMs: nextBlackoutTime - Date.now()
+  });
 });
 
 // -------- HEALTH --------
 app.get("/health", (req, res) => {
-  return res.json({
+  res.json({
     node: NODE_ID,
     status: "ACTIVE",
-    uptime: process.uptime(),
+    blackout: isInBlackout
+  });
+});
+
+// -------- HEARTBEAT --------
+setInterval(async () => {
+  try {
+    await redis.set(`node:${NODE_ID}`, Date.now());
+  } catch (err) {
+    console.error("Heartbeat failed:", err.message);
+  }
+}, 3000);
+
+app.get("/orbital-status", (req, res) => {
+  res.json({
+    nodeId: NODE_ID,
+    isInBlackout,
+    nextBlackoutInMs: nextBlackoutTime - Date.now()
   });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Storage Node ${NODE_ID} running on port ${PORT}`);
 });
-
-// -------- HEARTBEAT --------
-setInterval(async () => {
-  try {
-    await redis.set(
-      `node:${NODE_ID}`,
-      Date.now()
-    );
-  } catch (err) {
-    console.error("Heartbeat failed:", err.message);
-  }
-}, 3000);
