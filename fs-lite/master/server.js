@@ -5,6 +5,13 @@ const { v4: uuidv4 } = require("uuid");
 const redis = require("./redisClient");
 const { startElection, amILeader } = require("./leader");
 const multer = require("multer");
+const { LRUCache } = require("lru-cache");
+
+const fileCache = new LRUCache({
+  max: 5,
+  maxSize: 200 * 1024 * 1024,
+  sizeCalculation: (value) => value.length,
+});
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -229,42 +236,83 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
 // ---------------- DOWNLOAD ----------------
 app.get("/download/:fileId", async (req, res) => {
+  const { fileId } = req.params;
+  const requestStart = Date.now();
+
   try {
-    const { fileId } = req.params;
+    console.log(`\n📥 Download requested for file: ${fileId}`);
+
+    // ---------------- CACHE CHECK ----------------
+    if (fileCache.has(fileId)) {
+      console.log("⚡ Cache HIT:", fileId);
+
+      const cachedBuffer = fileCache.get(fileId);
+
+      console.log(
+        `⏱ Served from cache in ${Date.now() - requestStart} ms`
+      );
+
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="cached_${fileId}"`
+      );
+      res.setHeader("Content-Type", "application/octet-stream");
+      return res.send(cachedBuffer);
+    }
+
+    console.log("🌀 Cache MISS — reconstructing from nodes");
 
     const data = await redis.get(`file:${fileId}`);
-    if (!data) return res.status(404).json({ error: "File not found" });
+    if (!data) {
+      console.log("❌ File metadata not found");
+      return res.status(404).json({ error: "File not found" });
+    }
 
     const metadata = JSON.parse(data);
     const buffers = [];
 
+    // ---------------- CHUNK FETCH ----------------
     for (const chunk of metadata.chunks) {
       let chunkBuffer = null;
 
+      console.log(`🔍 Fetching chunk: ${chunk.chunkId}`);
+
       for (const node of chunk.nodes) {
         try {
+          const nodeStart = Date.now();
+
           const response = await axios.get(
             `${node}/chunk/${chunk.chunkId}`,
             { timeout: 2000 }
           );
 
+          console.log(
+            `   ✅ Fetched from ${node} in ${Date.now() - nodeStart} ms`
+          );
+
           chunkBuffer = Buffer.from(response.data.data, "base64");
           break;
-        } catch (_) {}
+
+        } catch (err) {
+          console.log(`   ❌ Failed from ${node}`);
+        }
       }
 
       if (!chunkBuffer) {
+        console.log("🚨 All replicas failed for chunk:", chunk.chunkId);
         return res.status(500).json({
           error: "All replicas failed for chunk",
         });
       }
 
+      // ---------------- INTEGRITY CHECK ----------------
       const hash = crypto
         .createHash("sha256")
         .update(chunkBuffer)
         .digest("hex");
 
       if (hash !== chunk.hash) {
+        console.log("🚨 Integrity check failed for:", chunk.chunkId);
         return res.status(500).json({
           error: "Integrity check failed",
         });
@@ -273,7 +321,20 @@ app.get("/download/:fileId", async (req, res) => {
       buffers.push(chunkBuffer);
     }
 
+    // ---------------- RECONSTRUCTION ----------------
     const finalBuffer = Buffer.concat(buffers);
+
+    console.log(
+      `📦 Reconstruction complete. Size: ${(finalBuffer.length / 1024 / 1024).toFixed(2)} MB`
+    );
+
+    // ---------------- STORE IN CACHE ----------------
+    fileCache.set(fileId, finalBuffer);
+    console.log("💾 Stored in cache:", fileId);
+
+    console.log(
+      `⏱ Total download time: ${Date.now() - requestStart} ms`
+    );
 
     res.setHeader(
       "Content-Disposition",
