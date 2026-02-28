@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 const redis = require("./redisClient");
 const { startElection, amILeader } = require("./leader");
 const multer = require("multer");
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
@@ -28,6 +29,7 @@ const NODES = [
 
 let roundRobinIndex = 0;
 
+// ---------------- ALIVE NODE DETECTION ----------------
 async function getAliveNodes() {
   const now = Date.now();
   const aliveNodes = [];
@@ -46,6 +48,78 @@ async function getAliveNodes() {
   return aliveNodes;
 }
 
+// ---------------- REBALANCER ----------------
+async function rebalance() {
+  if (!amILeader()) return;
+
+  const aliveNodes = await getAliveNodes();
+  if (aliveNodes.length < 2) return;
+
+  const keys = await redis.keys("file:*");
+
+  for (const key of keys) {
+    const fileData = await redis.get(key);
+    if (!fileData) continue;
+
+    const metadata = JSON.parse(fileData);
+    let updated = false;
+
+    for (const chunk of metadata.chunks) {
+      if (!chunk.nodes) continue; // Safety for old schema
+
+      // Remove dead nodes from metadata
+      chunk.nodes = chunk.nodes.filter(node =>
+        aliveNodes.includes(node)
+      );
+
+      if (chunk.nodes.length >= 2) continue;
+
+      if (chunk.nodes.length === 0) {
+        console.log("All replicas lost for chunk:", chunk.chunkId);
+        continue;
+      }
+
+      const sourceNode = chunk.nodes[0];
+
+      const targetNode = aliveNodes.find(
+        node => !chunk.nodes.includes(node)
+      );
+
+      if (!targetNode) continue;
+
+      try {
+        const response = await axios.get(
+          `${sourceNode}/chunk/${chunk.chunkId}`
+        );
+
+        await axios.post(`${targetNode}/store`, {
+          chunkId: chunk.chunkId,
+          data: response.data.data,
+        });
+
+        chunk.nodes.push(targetNode);
+        updated = true;
+
+        console.log(
+          `Rebalanced chunk ${chunk.chunkId} to ${targetNode}`
+        );
+
+      } catch (err) {
+        console.log("Rebalance failed:", err.message);
+      }
+    }
+
+    if (updated) {
+      await redis.set(key, JSON.stringify(metadata));
+    }
+  }
+}
+
+// Run rebalancer every 10 seconds
+setInterval(() => {
+  rebalance();
+}, 10000);
+
 // ---------------- UPLOAD ----------------
 app.post("/upload", upload.single("file"), async (req, res) => {
   if (!amILeader()) {
@@ -59,7 +133,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   const storedChunks = [];
 
   try {
-    // 🔥 Get alive nodes first
     const aliveNodes = await getAliveNodes();
 
     if (aliveNodes.length < 2) {
@@ -72,7 +145,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     const filename = req.file.originalname;
     const buffer = req.file.buffer;
 
-    const chunkSize = 1024 * 1024; // 1MB
+    const chunkSize = 1024 * 1024;
     const chunks = [];
 
     for (let i = 0; i < buffer.length; i += chunkSize) {
@@ -93,7 +166,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         .update(chunks[i])
         .digest("hex");
 
-      // 🔥 Use alive nodes only
       const primaryIndex = roundRobinIndex % aliveNodes.length;
       const replicaIndex = (primaryIndex + 1) % aliveNodes.length;
 
@@ -103,13 +175,11 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       roundRobinIndex++;
 
       try {
-        // Store in primary
         await axios.post(`${primaryNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
         });
 
-        // Store in replica
         await axios.post(`${replicaNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
@@ -123,7 +193,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       } catch (err) {
         console.error("Replication failed, rolling back...");
 
-        // Rollback everything stored so far
         for (const chunk of storedChunks) {
           for (const node of chunk.nodes) {
             try {
@@ -157,6 +226,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     return res.status(500).json({ error: "Upload failed" });
   }
 });
+
 // ---------------- DOWNLOAD ----------------
 app.get("/download/:fileId", async (req, res) => {
   try {
@@ -180,10 +250,7 @@ app.get("/download/:fileId", async (req, res) => {
 
           chunkBuffer = Buffer.from(response.data.data, "base64");
           break;
-
-        } catch (err) {
-          console.log(`Node ${node} failed, trying next...`);
-        }
+        } catch (_) {}
       }
 
       if (!chunkBuffer) {
@@ -208,7 +275,10 @@ app.get("/download/:fileId", async (req, res) => {
 
     const finalBuffer = Buffer.concat(buffers);
 
-    res.setHeader("Content-Disposition", `attachment; filename="${metadata.filename}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${metadata.filename}"`
+    );
     res.setHeader("Content-Type", "application/octet-stream");
     res.send(finalBuffer);
 
