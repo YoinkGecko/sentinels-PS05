@@ -1,6 +1,10 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const { createClient } = require("redis");
+
+const redis = createClient();
+redis.connect().catch(console.error);
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -94,3 +98,15 @@ app.get("/health", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Storage Node ${NODE_ID} running on port ${PORT}`);
 });
+
+// -------- HEARTBEAT --------
+setInterval(async () => {
+  try {
+    await redis.set(
+      `node:${NODE_ID}`,
+      Date.now()
+    );
+  } catch (err) {
+    console.error("Heartbeat failed:", err.message);
+  }
+}, 3000);
