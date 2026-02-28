@@ -28,6 +28,24 @@ const NODES = [
 
 let roundRobinIndex = 0;
 
+async function getAliveNodes() {
+  const now = Date.now();
+  const aliveNodes = [];
+
+  for (const nodeUrl of NODES) {
+    const nodeId = `node-${nodeUrl.split(":").pop()}`;
+    const lastSeen = await redis.get(`node:${nodeId}`);
+
+    if (!lastSeen) continue;
+
+    if (now - Number(lastSeen) < 6000) {
+      aliveNodes.push(nodeUrl);
+    }
+  }
+
+  return aliveNodes;
+}
+
 // ---------------- UPLOAD ----------------
 app.post("/upload", upload.single("file"), async (req, res) => {
   if (!amILeader()) {
@@ -41,6 +59,15 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   const storedChunks = [];
 
   try {
+    // 🔥 Get alive nodes first
+    const aliveNodes = await getAliveNodes();
+
+    if (aliveNodes.length < 2) {
+      return res.status(500).json({
+        error: "Not enough alive nodes for replication",
+      });
+    }
+
     const fileId = uuidv4();
     const filename = req.file.originalname;
     const buffer = req.file.buffer;
@@ -66,20 +93,23 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         .update(chunks[i])
         .digest("hex");
 
-      const primaryIndex = roundRobinIndex % NODES.length;
-      const replicaIndex = (primaryIndex + 1) % NODES.length;
+      // 🔥 Use alive nodes only
+      const primaryIndex = roundRobinIndex % aliveNodes.length;
+      const replicaIndex = (primaryIndex + 1) % aliveNodes.length;
 
-      const primaryNode = NODES[primaryIndex];
-      const replicaNode = NODES[replicaIndex];
+      const primaryNode = aliveNodes[primaryIndex];
+      const replicaNode = aliveNodes[replicaIndex];
 
       roundRobinIndex++;
 
       try {
+        // Store in primary
         await axios.post(`${primaryNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
         });
 
+        // Store in replica
         await axios.post(`${replicaNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
@@ -93,6 +123,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       } catch (err) {
         console.error("Replication failed, rolling back...");
 
+        // Rollback everything stored so far
         for (const chunk of storedChunks) {
           for (const node of chunk.nodes) {
             try {
