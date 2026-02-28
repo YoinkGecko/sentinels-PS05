@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Orbital FS-Lite Control Center</title>
+  <style>
+    body {
+      background: #0f1117;
+      color: #e6edf3;
+      font-family: Arial, sans-serif;
+      margin: 0;
+    }
+
+    .tabs {
+      display: flex;
+      background: #161b22;
+    }
+
+    .tab {
+      padding: 15px 25px;
+      cursor: pointer;
+      border-right: 1px solid #30363d;
+    }
+
+    .tab.active {
+      background: #21262d;
+    }
+
+    .section {
+      display: none;
+      padding: 20px;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    .card {
+      background: #161b22;
+      padding: 15px;
+      margin-bottom: 15px;
+      border-radius: 6px;
+    }
+
+    .node-active { color: #2ea043; }
+    .node-dead { color: #f85149; }
+
+    button {
+      background: #238636;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    input[type="file"] {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('user')">User</div>
+  <div class="tab" onclick="showTab('admin')">Admin</div>
+  <div class="tab" onclick="showTab('orbital')">Orbital</div>
+</div>
+
+<div id="user" class="section active">
+  <h2>Upload File</h2>
+  <input type="file" id="fileInput">
+  <br>
+  <button onclick="uploadFile()">Upload</button>
+
+  <h2>Files</h2>
+  <div id="fileList"></div>
+</div>
+
+<div id="admin" class="section">
+  <h2>Nodes</h2>
+  <div id="nodes"></div>
+
+  <h2>Metadata</h2>
+  <div id="metadata"></div>
+
+  <h2>Cache</h2>
+  <div id="cache"></div>
+</div>
+
+<div id="orbital" class="section">
+  <h2>Orbital Status</h2>
+  <div id="orbitalView"></div>
+</div>
+
+<script>
+
+function showTab(id) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+
+  event.target.classList.add("active");
+  document.getElementById(id).classList.add("active");
+}
+
+async function uploadFile() {
+  const fileInput = document.getElementById("fileInput");
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+
+  await fetch("/upload", {
+    method: "POST",
+    body: formData
+  });
+
+  alert("Uploaded");
+  loadFiles();
+}
+
+async function loadFiles() {
+  const res = await fetch("/metadata");
+  const data = await res.json();
+
+  const container = document.getElementById("fileList");
+  container.innerHTML = "";
+
+  data.files.forEach(file => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      <b>${file.filename}</b><br>
+      Chunks: ${file.totalChunks}<br>
+      <button onclick="downloadFile('${file.fileId}')">Download</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function downloadFile(id) {
+  window.open("/download/" + id);
+}
+
+async function loadNodes() {
+  const res = await fetch("/nodes");
+  const data = await res.json();
+
+  const container = document.getElementById("nodes");
+  container.innerHTML = "";
+
+  data.forEach(node => {
+    const div = document.createElement("div");
+    div.className = "card";
+
+    if (!node.alive) {
+      div.innerHTML = `<b>${node.url}</b><br>
+      <span class="node-dead">DEAD</span>`;
+    } else {
+      div.innerHTML = `<b>${node.url}</b><br>
+      <span class="node-active">ACTIVE</span><br>
+      Blackout in: ${node.nextBlackoutInMs} ms<br>
+      In Blackout: ${node.isInBlackout}`;
+    }
+
+    container.appendChild(div);
+  });
+}
+
+async function loadMetadata() {
+  const res = await fetch("/metadata");
+  const data = await res.json();
+
+  const container = document.getElementById("metadata");
+  container.innerHTML = "";
+
+  data.files.forEach(file => {
+    const div = document.createElement("div");
+    div.className = "card";
+
+    let chunkInfo = "";
+    file.chunks.forEach(chunk => {
+      chunkInfo += `
+        Chunk ${chunk.chunkId}<br>
+        Nodes: ${chunk.nodes.join(", ")}<br><br>
+      `;
+    });
+
+    div.innerHTML = `
+      <b>${file.filename}</b><br>
+      ${chunkInfo}
+    `;
+
+    container.appendChild(div);
+  });
+}
+
+async function loadCache() {
+  const res = await fetch("/cache-status");
+  const data = await res.json();
+
+  const container = document.getElementById("cache");
+  container.innerHTML = "";
+
+  data.files.forEach(file => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      ${file.filename} (${file.sizeMB} MB)
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function loadOrbital() {
+  const res = await fetch("/nodes");
+  const data = await res.json();
+
+  const container = document.getElementById("orbitalView");
+  container.innerHTML = "";
+
+  data.forEach(node => {
+    const div = document.createElement("div");
+    div.className = "card";
+
+    const color = node.isInBlackout ? "#f85149" : "#2ea043";
+
+    div.innerHTML = `
+      <div style="width:20px;height:20px;background:${color};border-radius:50%;display:inline-block;"></div>
+      ${node.url} — ${node.nextBlackoutInMs} ms
+    `;
+
+    container.appendChild(div);
+  });
+}
+
+setInterval(() => {
+  loadNodes();
+  loadMetadata();
+  loadCache();
+  loadOrbital();
+}, 3000);
+
+loadFiles();
+loadNodes();
+loadMetadata();
+loadCache();
+loadOrbital();
+
+</script>
+
+</body>
+</html>

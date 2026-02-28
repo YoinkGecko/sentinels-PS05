@@ -7,8 +7,10 @@ const { startElection, amILeader } = require("./leader");
 const multer = require("multer");
 const { LRUCache } = require("lru-cache");
 
+
 const app = express();
 app.use(express.json({ limit: "200mb" }));
+app.use(express.static("public"));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
