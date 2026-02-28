@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const redis = require("./redisClient");
 const { startElection, amILeader } = require("./leader");
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 app.use(express.json({ limit: "100mb" }));
@@ -27,25 +29,25 @@ const NODES = [
 let roundRobinIndex = 0;
 
 // ---------------- UPLOAD ----------------
-app.post("/upload", async (req, res) => {
+app.post("/upload", upload.single("file"), async (req, res) => {
   if (!amILeader()) {
     return res.status(403).json({ error: "Not leader" });
   }
 
-  const storedChunks = []; // Track for rollback
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+
+  const storedChunks = [];
 
   try {
-    const { filename, data } = req.body;
-
-    if (!filename || !data) {
-      return res.status(400).json({ error: "Missing filename or data" });
-    }
-
     const fileId = uuidv4();
-    const chunkSize = 1024 * 1024; // 1MB
-    const buffer = Buffer.from(data, "base64");
+    const filename = req.file.originalname;
+    const buffer = req.file.buffer;
 
+    const chunkSize = 1024 * 1024; // 1MB
     const chunks = [];
+
     for (let i = 0; i < buffer.length; i += chunkSize) {
       chunks.push(buffer.slice(i, i + chunkSize));
     }
@@ -73,19 +75,16 @@ app.post("/upload", async (req, res) => {
       roundRobinIndex++;
 
       try {
-        // Store in primary
         await axios.post(`${primaryNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
         });
 
-        // Store in replica
         await axios.post(`${replicaNode}/store`, {
           chunkId,
           data: chunks[i].toString("base64"),
         });
 
-        // Track successful replication
         storedChunks.push({
           chunkId,
           nodes: [primaryNode, replicaNode],
@@ -94,7 +93,6 @@ app.post("/upload", async (req, res) => {
       } catch (err) {
         console.error("Replication failed, rolling back...");
 
-        // Rollback everything stored so far
         for (const chunk of storedChunks) {
           for (const node of chunk.nodes) {
             try {
@@ -120,6 +118,7 @@ app.post("/upload", async (req, res) => {
     return res.json({
       message: "Upload successful",
       fileId,
+      totalChunks: chunks.length,
     });
 
   } catch (err) {
@@ -127,7 +126,6 @@ app.post("/upload", async (req, res) => {
     return res.status(500).json({ error: "Upload failed" });
   }
 });
-
 // ---------------- DOWNLOAD ----------------
 app.get("/download/:fileId", async (req, res) => {
   try {
