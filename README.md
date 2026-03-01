@@ -103,12 +103,6 @@ cd fs-lite/deploy
 docker compose up -d --build
 ```
 
-Alternatively, clone and launch in one line:
-
-```bash
-git clone <repo-url> && cd <repo>/fs-lite/deploy && docker compose up -d --build
-```
-
 The UI/API is available at http://localhost:3000 once the master is up.
 
 ### Manual (non‑Docker) Runs
