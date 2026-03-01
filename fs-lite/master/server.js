@@ -31,11 +31,10 @@ startElection(MASTER_ID);
 
 // ---------------- STORAGE NODES ----------------
 const NODES = [
-  "http://localhost:4001",
-  "http://localhost:4002",
-  "http://localhost:4003",
+  "http://node1:4001",
+  "http://node2:4002",
+  "http://node3:4003",
 ];
-
 let roundRobinIndex = 0;
 
 // ---------------- ALIVE NODE CHECK ----------------
