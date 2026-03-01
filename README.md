@@ -6,7 +6,7 @@
 
 ---
 
-## 🚀 Project Overview
+## Project Overview
 
 COSMEON FS‑LITE is an educational simulation of an orbital distributed file system. Its goal is to mimic the challenges of storing and retrieving data across satellites that periodically go out of contact due to orbital mechanics. The system demonstrates:
 
@@ -17,7 +17,7 @@ COSMEON FS‑LITE is an educational simulation of an orbital distributed file sy
 
 This repository contains all code, configuration, and documentation required to run the simulation locally.
 
-## 🧠 Problem Overview
+## Problem Overview
 
 Real-world satellite constellations suffer from predictable communication blackouts as each satellite orbits the Earth. Rather than reacting to lost connectivity, COSMEON FS‑LITE simulates this environment and **proactively prepares** for outages by reconstructing and caching files before a node becomes unreachable. The system ensures:
 
@@ -27,7 +27,7 @@ Real-world satellite constellations suffer from predictable communication blacko
 
 ---
 
-## 🏗️ Core Architecture
+## Core Architecture
 
 The system comprises the following components:
 
@@ -40,7 +40,7 @@ All services communicate over an internal Docker network; the master exposes a w
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - **File Chunking & Distribution** – files are split into 1 MB chunks and distributed across the nodes.
 - **Dual Replication** – every chunk has a primary and a replica on distinct nodes.
@@ -56,7 +56,7 @@ All services communicate over an internal Docker network; the master exposes a w
 
 ---
 
-## 🔮 Predictive Availability Caching (WOW Factor)
+## Predictive Availability Caching (WOW Factor)
 
 Unlike traditional systems that **react** to node failures, COSMEON FS‑LITE **predicts** them. Each node broadcasts its blackout schedule; the master uses this information to:
 
@@ -68,7 +68,7 @@ This results in dramatically lower latency when accessing files during outages a
 
 ---
 
-## 🌟 Differentiators
+## Differentiators
 
 - **Orbital blackout model** – connectivity depends on a time‑based schedule rather than random failures.
 - **Proactive caching** – prepare for outages instead of reacting to them.
@@ -78,7 +78,7 @@ This results in dramatically lower latency when accessing files during outages a
 
 ---
 
-## 🛠️ Deployment & Installation
+## Deployment & Installation
 
 ### Prerequisites
 
@@ -125,7 +125,7 @@ REDIS_URL=redis://127.0.0.1:6379 node server.js 4001
 # repeat for 4002/4003
 ```
 
-> ⚠️ This approach requires Node.js and Redis installed on your host.
+> ⚠️his approach requires Node.js and Redis installed on your host.
 
 ### Customization
 
@@ -144,7 +144,7 @@ docker compose down --volumes --remove-orphans
 
 ---
 
-## 🎬 Demonstration Scenario
+## Demonstration Scenario
 
 1. Upload a large file via the master UI/API (`/upload`).
 2. Watch chunks appear under `node/storage-4001`, `4002`, `4003`.
@@ -156,7 +156,7 @@ docker compose down --volumes --remove-orphans
 
 ---
 
-## 📈 System Impact
+## System Impact
 
 COSMEON FS‑LITE showcases core distributed systems concepts and production‑style engineering:
 
@@ -170,7 +170,7 @@ This project goes beyond a simple proof‑of‑concept and serves as a teaching 
 
 ---
 
-## 📂 Repository Structure
+## Repository Structure
 
 ```
 fs-lite/
@@ -183,9 +183,9 @@ fs-lite/
 
 ---
 
-## 📝 License
+## License
 
-[MIT](LICENSE) (or specify whichever license applies)
+[MIT](LICENSE)
 
 ---
 
