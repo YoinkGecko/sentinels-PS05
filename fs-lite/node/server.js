@@ -20,7 +20,9 @@ const STORAGE_DIR = path.join(__dirname, `storage-${PORT}`);
 fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
 // -------- REDIS --------
-const redis = createClient();
+const redis = createClient({
+  url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+});
 redis.connect().catch(console.error);
 
 // -------- BLACKOUT SIMULATION --------

@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  node1:
+    build:
+      context: ../node
+      dockerfile: Dockerfile.node
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: ["node", "server.js", "4001"]
+    ports:
+      - "4001:4001"
+    volumes:
+      - ../node/storage-4001:/usr/src/app/storage-4001
+    depends_on:
+      - redis
+
+  node2:
+    build:
+      context: ../node
+      dockerfile: Dockerfile.node
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: ["node", "server.js", "4002"]
+    ports:
+      - "4002:4002"
+    volumes:
+      - ../node/storage-4002:/usr/src/app/storage-4002
+    depends_on:
+      - redis
+
+  node3:
+    build:
+      context: ../node
+      dockerfile: Dockerfile.node
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: ["node", "server.js", "4003"]
+    ports:
+      - "4003:4003"
+    volumes:
+      - ../node/storage-4003:/usr/src/app/storage-4003
+    depends_on:
+      - redis
+
+  master:
+    build:
+      context: ../master
+      dockerfile: Dockerfile.master
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: ["node", "server.js", "3000"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - node1
+      - node2
+      - node3
+      - redis
