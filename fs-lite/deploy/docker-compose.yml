@@ -48,7 +48,7 @@ services:
     depends_on:
       - redis
 
-  master:
+  master1:
     build:
       context: ../master
       dockerfile: Dockerfile.master
@@ -57,6 +57,21 @@ services:
     command: ["node", "server.js", "3000"]
     ports:
       - "3000:3000"
+    depends_on:
+      - node1
+      - node2
+      - node3
+      - redis
+
+  master2:
+    build:
+      context: ../master
+      dockerfile: Dockerfile.master
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: ["node", "server.js", "3001"]
+    ports:
+      - "3001:3001"
     depends_on:
       - node1
       - node2
