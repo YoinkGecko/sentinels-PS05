@@ -99,6 +99,7 @@ From the `deploy/` directory, run:
 
 ```bash
 # build and start all services in detached mode
+cd fs-lite/deploy
 docker compose up -d --build
 ```
 
